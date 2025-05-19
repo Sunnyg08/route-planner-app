@@ -15,27 +15,26 @@ gmaps = googlemaps.Client(key=API_KEY)
 st.set_page_config(page_title="Multi-Driver Route Planner", layout="centered")
 st.title("🚗 Optimal Route Planner (Kitchen K)")
 
-# Session defaults
+# --- Session State Defaults ---
 if "addresses_input" not in st.session_state:
     st.session_state.addresses_input = ""
 if "start_address" not in st.session_state:
     st.session_state.start_address = ""
 
-# Reset function
+# --- Reset Function ---
 def reset_inputs():
     st.session_state.addresses_input = ""
     st.session_state.start_address = ""
 
-# PDF upload
+# --- PDF Upload and Extraction ---
 pdf_file = st.file_uploader("Upload a PDF with addresses (one per line):", type=["pdf"])
-
 extracted_addresses = []
 if pdf_file:
     with fitz.open(stream=pdf_file.read(), filetype="pdf") as doc:
         text = "\n".join([page.get_text() for page in doc])
         extracted_addresses = [line.strip() for line in text.splitlines() if line.strip()]
 
-# Inputs
+# --- Inputs ---
 num_drivers = st.selectbox("Select number of drivers:", [1, 2, 3, 4])
 start_address = st.text_input("Starting Address:", key="start_address")
 addresses_input = st.text_area(
@@ -47,31 +46,29 @@ addresses_input = st.text_area(
 addresses = [a.strip() for a in addresses_input.split('\n') if a.strip()]
 stop_time = st.selectbox("Stop duration at each location (minutes):", [5, 7, 10])
 sort_method = st.selectbox("Sort by:", ["Normal Optimized Route", "Farthest First Route"])
+
+# --- Buttons ---
 col1, col2 = st.columns([1, 1])
 calculate_clicked = col1.button("Calculate Route")
 reset_clicked = col2.button("Reset", on_click=reset_inputs)
 
-# Helpers
+# --- Geocode Address Helper ---
 def geocode_address(address):
     try:
-        result = gmaps.geocode(address)
-        if result:
-            loc = result[0]['geometry']['location']
+        geocode = gmaps.geocode(address)
+        if geocode:
+            loc = geocode[0]['geometry']['location']
             return (loc['lat'], loc['lng'])
-    except Exception:
-        return None
+    except:
+        pass
     return None
 
-def optimize_route(start, stops):
-    if not stops:
-        return [], 0, 0, 0
-
-    all_addresses = [start] + stops
+# --- Route Optimizer ---
+def optimize_route(address_list):
+    all_addresses = [start_address] + address_list
     matrix = gmaps.distance_matrix(all_addresses, all_addresses, mode='driving')
 
-    if 'rows' not in matrix or len(matrix['rows']) != len(all_addresses):
-        raise ValueError("Invalid response from Google Maps Distance Matrix.")
-
+    # Parse durations with error handling
     durations = []
     for row_index, row in enumerate(matrix['rows']):
         row_durations = []
@@ -83,8 +80,12 @@ def optimize_route(start, stops):
                     f"⚠️ Could not get duration between address {row_index} and {col_index}. "
                     "Check if the address is valid or reachable by car."
                 )
-            r    ow_durations.append(float('inf'))
+                row_durations.append(float('inf'))
         durations.append(row_durations)
+
+    # Check if any durations are unreachable
+    if any(float('inf') in row for row in durations):
+        raise ValueError("Distance matrix contains unreachable destinations.")
 
     stop_indices = list(range(1, len(all_addresses)))
 
@@ -104,17 +105,14 @@ def optimize_route(start, stops):
         optimal_order = [0] + sorted_stops
 
     optimal_addresses = [all_addresses[i] for i in optimal_order]
-    route_drive_time = sum(
-        durations[optimal_order[i]][optimal_order[i + 1]]
-        for i in range(len(optimal_order) - 1)
-    )
+    route_drive_time = sum(durations[optimal_order[i]][optimal_order[i + 1]] for i in range(len(optimal_order) - 1))
     return_to_start_time = durations[optimal_order[-1]][0]
-    total_stop_time = stop_time * 60 * len(stops)
+    total_stop_time = stop_time * 60 * len(address_list)
     total_time = route_drive_time + total_stop_time
 
     return optimal_addresses, route_drive_time, total_time, return_to_start_time
 
-# Main logic
+# --- Route Calculation ---
 if calculate_clicked:
     if not start_address:
         st.warning("Please enter a starting address.")
@@ -122,40 +120,36 @@ if calculate_clicked:
         st.warning("Please enter at least one destination stop.")
     else:
         try:
+            # Geocode destination addresses
             coords = [geocode_address(addr) for addr in addresses]
-            valid_data = [(addr, coord) for addr, coord in zip(addresses, coords) if coord is not None]
-
+            valid_data = [(addr, c) for addr, c in zip(addresses, coords) if c is not None]
             if len(valid_data) < num_drivers:
-                st.error("Not enough valid addresses to assign to each driver.")
+                st.error("❌ Not enough valid addresses to assign to all drivers.")
             else:
-                if num_drivers == 1:
-                    clusters = {0: [addr for addr, _ in valid_data]}
-                else:
-                    kmeans = KMeans(n_clusters=num_drivers, random_state=42)
-                    coords_only = [coord for _, coord in valid_data]
-                    kmeans.fit(coords_only)
-                    clusters = {i: [] for i in range(num_drivers)}
-                    for (addr, _), label in zip(valid_data, kmeans.labels_):
-                        clusters[label].append(addr)
+                # Clustering
+                locations = [loc for _, loc in valid_data]
+                kmeans = KMeans(n_clusters=num_drivers, random_state=42).fit(locations)
+                clusters = {i: [] for i in range(num_drivers)}
+                for (addr, _), label in zip(valid_data, kmeans.labels_):
+                    clusters[label].append(addr)
 
-                for driver in range(num_drivers):
-                    stops = clusters.get(driver, [])
-                    if not stops:
-                        st.warning(f"No addresses for Driver {driver + 1}")
-                        continue
+                # Show routes per driver
+                for driver_num in range(num_drivers):
+                    driver_addresses = clusters[driver_num]
+                    st.subheader(f"🧭 Driver {driver_num + 1} Route")
 
-                    st.subheader(f"🚚 Driver {driver + 1}")
-                    route, drive_time, total_time, return_time = optimize_route(start_address, stops)
+                    route, drive_time, total_time, return_time = optimize_route(driver_addresses)
 
                     for i, addr in enumerate(route):
                         st.write(f"{i}. {addr}")
 
-                    st.markdown(f"- 🕒 **Drive time**: {drive_time // 60} mins")
-                    st.markdown(f"- ⏱️ **Total time (incl. stops)**: {total_time // 60} mins")
-                    st.markdown(f"- ↩️ **Return to start**: {return_time // 60} mins")
+                    st.write(f"- 🕒 Driving Time: **{drive_time // 60} mins**")
+                    st.write(f"- ⏱️ Total Time (with {stop_time}-min stops): **{total_time // 60} mins**")
+                    st.write(f"- ↩️ Return to Start Time: **{return_time // 60} mins**")
 
                     map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
-                    st.markdown(f"[🗺️ Open Route in Google Maps]({map_url})")
+                    st.markdown(f"[Open Route in Google Maps]({map_url})")
 
         except Exception as e:
             st.error(f"❌ Error: {e}")
+

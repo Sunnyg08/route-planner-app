@@ -143,9 +143,10 @@ if calculate_clicked:
                     for i, addr in enumerate(route):
                         st.write(f"{i}. {addr}")
 
-                    st.write(f"- 🕒 Driving Time: **{drive_time // 60} mins**")
-                    st.write(f"- ⏱️ Total Time (with {stop_time}-min stops): **{total_time // 60} mins**")
-                    st.write(f"- ↩️ Return to Start Time: **{return_time // 60} mins**")
+                    st.subheader("🕓 Time Estimates")
+                    st.write(f"🚘 Driving time (no stops): **{route_drive_time // 60} minutes**")
+                    st.write(f"🕒 Total time with {stop_time}-minute stops: **{total_time // 60} minutes**")
+                    st.write(f"↩️ Time to return to start from last stop: **{return_to_start_time // 60} minutes**")
 
                     map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
                     st.markdown(f"[Open Route in Google Maps]({map_url})")

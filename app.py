@@ -9,7 +9,7 @@ import numpy as np
 
 
 # Initialize Google Maps client
-API_KEY = "AIzaSyDEMwIP-8B3Uu_lJFLlL4EQMBb6EOb_7Sw"
+API_KEY = "AIzaSyAXsCZX0UeX06qCcDN2WG7dGkrj4OD5J1A"
 gmaps = googlemaps.Client(key=API_KEY)
 
 

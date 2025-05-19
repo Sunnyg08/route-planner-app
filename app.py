@@ -73,13 +73,17 @@ def optimize_route(start, stops):
         raise ValueError("Invalid response from Google Maps Distance Matrix.")
 
     durations = []
-    for row in matrix['rows']:
+    for row_index, row in enumerate(matrix['rows']):
         row_durations = []
-        for cell in row['elements']:
+        for col_index, cell in enumerate(row['elements']):
             if cell.get("status") == "OK":
                 row_durations.append(cell["duration"]["value"])
             else:
-                row_durations.append(float('inf'))
+                st.warning(
+                    f"⚠️ Could not get duration between address {row_index} and {col_index}. "
+                    "Check if the address is valid or reachable by car."
+                )
+            r    ow_durations.append(float('inf'))
         durations.append(row_durations)
 
     stop_indices = list(range(1, len(all_addresses)))

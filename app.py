@@ -23,7 +23,7 @@ def geocode_address(address):
             lat = location[0]['geometry']['location']['lat']
             lng = location[0]['geometry']['location']['lng']
             return (lat, lng)
-    except:
+    except Exception as e:
         return None
 
 def get_drive_time(origin, destination):
@@ -31,7 +31,7 @@ def get_drive_time(origin, destination):
         result = gmaps.distance_matrix(origin, destination, mode="driving")
         duration = result['rows'][0]['elements'][0]['duration']['value']
         return duration
-    except:
+    except Exception as e:
         return float('inf')
 
 def optimize_route(addresses):
@@ -127,7 +127,6 @@ if calc and addresses:
         st.markdown(f"[Open Route in Google Maps]({map_url})")
 
     else:
-        # Geocode and collect valid addresses with their coordinates
         address_coords = []
         valid_addresses = []
 
@@ -184,6 +183,3 @@ if calc and addresses:
 
                     map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
                     st.markdown(f"[Open Route in Google Maps]({map_url})")
-
-        except Exception as e:
-            st.error(f"❌ Error: {e}")

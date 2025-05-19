@@ -28,7 +28,7 @@ def reset_inputs():
     st.session_state.start_address = ""
 
 # Upload file (PDF, CSV, or Excel)
-st.subheader("📄 Upload Addresses File")
+
 uploaded_file = st.file_uploader("Upload a PDF, CSV, or Excel file with addresses:", type=["pdf", "csv", "xlsx"])
 extracted_addresses = []
 

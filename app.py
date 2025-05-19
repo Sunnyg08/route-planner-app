@@ -1,6 +1,7 @@
 # app.py
 import streamlit as st
 import googlemaps
+import pandas as pd
 import fitz  # PyMuPDF
 from sklearn.cluster import KMeans
 from itertools import permutations
@@ -15,27 +16,46 @@ gmaps = googlemaps.Client(key=API_KEY)
 st.set_page_config(page_title="Multi-Driver Route Planner", layout="centered")
 st.title("🚗 Optimal Route Planner (Kitchen K)")
 
-# --- Session State Defaults ---
+# Session defaults
 if "addresses_input" not in st.session_state:
     st.session_state.addresses_input = ""
 if "start_address" not in st.session_state:
     st.session_state.start_address = ""
 
-# --- Reset Function ---
+# Reset function
 def reset_inputs():
     st.session_state.addresses_input = ""
     st.session_state.start_address = ""
 
-# --- PDF Upload and Extraction ---
-pdf_file = st.file_uploader("Upload a PDF with addresses (one per line):", type=["pdf"])
+# Upload file (PDF, CSV, or Excel)
+st.subheader("📄 Upload Addresses File")
+uploaded_file = st.file_uploader("Upload a PDF, CSV, or Excel file with addresses:", type=["pdf", "csv", "xlsx"])
 extracted_addresses = []
-if pdf_file:
-    with fitz.open(stream=pdf_file.read(), filetype="pdf") as doc:
-        text = "\n".join([page.get_text() for page in doc])
-        extracted_addresses = [line.strip() for line in text.splitlines() if line.strip()]
 
-# --- Inputs ---
+if uploaded_file:
+    try:
+        if uploaded_file.name.endswith(".pdf"):
+            with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+                text = "\n".join([page.get_text() for page in doc])
+                extracted_addresses = [line.strip() for line in text.splitlines() if line.strip()]
+
+        elif uploaded_file.name.endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+            address_column = 'Address' if 'Address' in df.columns else df.columns[0]
+            extracted_addresses = df[address_column].dropna().astype(str).tolist()
+
+        elif uploaded_file.name.endswith((".xls", ".xlsx")):
+            df = pd.read_excel(uploaded_file)
+            address_column = 'Address' if 'Address' in df.columns else df.columns[0]
+            extracted_addresses = df[address_column].dropna().astype(str).tolist()
+
+    except Exception as e:
+        st.error(f"❌ Error reading file: {e}")
+
+# Driver count
 num_drivers = st.selectbox("Select number of drivers:", [1, 2, 3, 4])
+
+# Start and stop inputs
 start_address = st.text_input("Starting Address:", key="start_address")
 addresses_input = st.text_area(
     "Enter destination stops (one per line):",
@@ -44,49 +64,29 @@ addresses_input = st.text_area(
     key="addresses_input"
 )
 addresses = [a.strip() for a in addresses_input.split('\n') if a.strip()]
+
 stop_time = st.selectbox("Stop duration at each location (minutes):", [5, 7, 10])
 sort_method = st.selectbox("Sort by:", ["Normal Optimized Route", "Farthest First Route"])
-
-# --- Buttons ---
 col1, col2 = st.columns([1, 1])
 calculate_clicked = col1.button("Calculate Route")
 reset_clicked = col2.button("Reset", on_click=reset_inputs)
 
-# --- Geocode Address Helper ---
+# Helper: get lat/lng for clustering
 def geocode_address(address):
-    try:
-        geocode = gmaps.geocode(address)
-        if geocode:
-            loc = geocode[0]['geometry']['location']
-            return (loc['lat'], loc['lng'])
-    except:
-        pass
+    geocode = gmaps.geocode(address)
+    if geocode:
+        loc = geocode[0]['geometry']['location']
+        return (loc['lat'], loc['lng'])
     return None
 
-# --- Route Optimizer ---
+# Helper: optimize route
 def optimize_route(address_list):
     all_addresses = [start_address] + address_list
     matrix = gmaps.distance_matrix(all_addresses, all_addresses, mode='driving')
-
-    # Parse durations with error handling
-    durations = []
-    for row_index, row in enumerate(matrix['rows']):
-        row_durations = []
-        for col_index, cell in enumerate(row['elements']):
-            if cell.get("status") == "OK":
-                row_durations.append(cell["duration"]["value"])
-            else:
-                st.warning(
-                    f"⚠️ Could not get duration between address {row_index} and {col_index}. "
-                    "Check if the address is valid or reachable by car."
-                )
-                row_durations.append(float('inf'))
-        durations.append(row_durations)
-
-    # Check if any durations are unreachable
-    if any(float('inf') in row for row in durations):
-        raise ValueError("Distance matrix contains unreachable destinations.")
-
+    durations = [
+        [cell['duration']['value'] if cell.get('duration') else float('inf') for cell in row['elements']]
+        for row in matrix['rows']
+    ]
     stop_indices = list(range(1, len(all_addresses)))
 
     if sort_method == "Normal Optimized Route":
@@ -112,7 +112,7 @@ def optimize_route(address_list):
 
     return optimal_addresses, route_drive_time, total_time, return_to_start_time
 
-# --- Route Calculation ---
+# Route calculation
 if calculate_clicked:
     if not start_address:
         st.warning("Please enter a starting address.")
@@ -120,20 +120,20 @@ if calculate_clicked:
         st.warning("Please enter at least one destination stop.")
     else:
         try:
-            # Geocode destination addresses
             coords = [geocode_address(addr) for addr in addresses]
-            valid_data = [(addr, c) for addr, c in zip(addresses, coords) if c is not None]
-            if len(valid_data) < num_drivers:
-                st.error("❌ Not enough valid addresses to assign to all drivers.")
-            else:
-                # Clustering
-                locations = [loc for _, loc in valid_data]
-                kmeans = KMeans(n_clusters=num_drivers, random_state=42).fit(locations)
-                clusters = {i: [] for i in range(num_drivers)}
-                for (addr, _), label in zip(valid_data, kmeans.labels_):
-                    clusters[label].append(addr)
+            coords_valid = [c for c in coords if c is not None]
 
-                # Show routes per driver
+            if len(coords_valid) < num_drivers:
+                st.error("Not enough valid addresses to split between drivers.")
+            else:
+                if num_drivers == 1:
+                    clusters = {0: addresses}
+                else:
+                    kmeans = KMeans(n_clusters=num_drivers, random_state=42).fit(coords_valid)
+                    clusters = {i: [] for i in range(num_drivers)}
+                    for idx, label in enumerate(kmeans.labels_):
+                        clusters[label].append(addresses[idx])
+
                 for driver_num in range(num_drivers):
                     driver_addresses = clusters[driver_num]
                     st.subheader(f"🧭 Driver {driver_num + 1} Route")
@@ -143,13 +143,12 @@ if calculate_clicked:
                     for i, addr in enumerate(route):
                         st.write(f"{i}. {addr}")
 
-                    st.write(f"- 🚘 Driving Time: **{drive_time // 60} mins**")
-                    st.write(f"- ⏱️ Total Time (with {stop_time}-min stops): **{total_time // 60} mins**")
-                    st.write(f"- ↩️ Return to Start Time: **{return_time // 60} mins**")
+                    st.write(f"- 🕒 Driving Time: {drive_time // 60} mins")
+                    st.write(f"- ⏱️ Total Time (with {stop_time} min stops): {total_time // 60} mins")
+                    st.write(f"- ↩️ Return to Start Time: {return_time // 60} mins")
 
                     map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
                     st.markdown(f"[Open Route in Google Maps]({map_url})")
 
         except Exception as e:
             st.error(f"❌ Error: {e}")
-

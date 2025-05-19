@@ -28,10 +28,11 @@ def reset_inputs():
     st.session_state.addresses_input = ""
     st.session_state.start_address = ""
 
-# Upload file (PDF, CSV, or Excel)
-
-uploaded_file = st.file_uploader("Upload a PDF, CSV, or Excel file with addresses:", type=["pdf", "csv", "xlsx"])
-extracted_addresses = []
+# --- File Uploads ---
+st.markdown("### 📤 Upload PDF, Excel, or CSV with addresses (one per line or row)")
+pdf_file = st.file_uploader("PDF File", type=["pdf"])
+csv_file = st.file_uploader("CSV File", type=["csv"])
+excel_file = st.file_uploader("Excel File", type=["xls", "xlsx"])
 
 extracted_addresses = []
 

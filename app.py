@@ -65,7 +65,7 @@ if uploaded_file:
         st.error(f"❌ Error reading file: {e}")
 
 # Driver count
-num_drivers = st.selectbox("Select number of drivers:", [1, 2, 3, 4])
+num_drivers = st.selectbox("Select number of drivers:", [1, 2, 3, 4, 5, 6, 7, 8])
 
 # Start and stop inputs
 start_address = st.text_input("Starting Address:", key="start_address")
@@ -77,7 +77,7 @@ addresses_input = st.text_area(
 )
 addresses = [a.strip() for a in addresses_input.split('\n') if a.strip()]
 
-stop_time = st.selectbox("Stop duration at each location (minutes):", [5, 7, 10])
+stop_time = st.selectbox("Stop duration at each location (minutes):", [3, 5, 7, 10])
 sort_method = st.selectbox("Sort by:", ["Normal Optimized Route", "Farthest First Route"])
 col1, col2 = st.columns([1, 1])
 calculate_clicked = col1.button("Calculate Route")

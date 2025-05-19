@@ -9,7 +9,7 @@ API_KEY = "AIzaSyDEMwIP-8B3Uu_lJFLlL4EQMBb6EOb_7Sw"
 gmaps = googlemaps.Client(key=API_KEY)
 
 st.set_page_config(page_title="Route Optimizer", layout="centered")
-st.title("🚗 Optimal Route Planner")
+st.title("🚗 Optimal Route Planner (Kitchen K)")
 st.write("Enter your starting point and multiple stops. Choose how to sort the route and how long you'll spend at each stop.")
 
 # --- Session State Defaults ---

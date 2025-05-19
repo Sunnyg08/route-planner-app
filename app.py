@@ -3,9 +3,10 @@ import streamlit as st
 import googlemaps
 import pandas as pd
 import fitz  # PyMuPDF
-from sklearn.cluster import KMeans
+from sklearn.cluster import AgglomerativeClustering
 from itertools import permutations
 import numpy as np
+import math
 
 
 # Initialize Google Maps client
@@ -28,7 +29,6 @@ def reset_inputs():
     st.session_state.start_address = ""
 
 # Upload file (PDF, CSV, or Excel)
-
 uploaded_file = st.file_uploader("Upload a PDF, CSV, or Excel file with addresses:", type=["pdf", "csv", "xlsx"])
 extracted_addresses = []
 
@@ -44,7 +44,7 @@ if uploaded_file:
             address_column = 'Address' if 'Address' in df.columns else df.columns[0]
             extracted_addresses = df[address_column].dropna().astype(str).tolist()
 
-        elif uploaded_file.name.endswith((".xls", ".xlsx")):
+        elif uploaded_file.name.endswith(('.xls', '.xlsx')):
             df = pd.read_excel(uploaded_file)
             address_column = 'Address' if 'Address' in df.columns else df.columns[0]
             extracted_addresses = df[address_column].dropna().astype(str).tolist()
@@ -71,15 +71,17 @@ col1, col2 = st.columns([1, 1])
 calculate_clicked = col1.button("Calculate Route")
 reset_clicked = col2.button("Reset", on_click=reset_inputs)
 
-# Helper: get lat/lng for clustering
+# Helpers
 def geocode_address(address):
-    geocode = gmaps.geocode(address)
-    if geocode:
-        loc = geocode[0]['geometry']['location']
-        return (loc['lat'], loc['lng'])
-    return None
+    try:
+        geocode = gmaps.geocode(address)
+        if geocode:
+            loc = geocode[0]['geometry']['location']
+            return (loc['lat'], loc['lng'])
+    except:
+        return None
 
-# Helper: optimize route
+
 def optimize_route(address_list):
     all_addresses = [start_address] + address_list
     matrix = gmaps.distance_matrix(all_addresses, all_addresses, mode='driving')
@@ -112,43 +114,50 @@ def optimize_route(address_list):
 
     return optimal_addresses, route_drive_time, total_time, return_to_start_time
 
-# Route calculation
+# Main route calculation
 if calculate_clicked:
     if not start_address:
         st.warning("Please enter a starting address.")
     elif len(addresses) < 1:
         st.warning("Please enter at least one destination stop.")
+    elif num_drivers * 9 < len(addresses):
+        st.error("Too many stops for selected number of drivers. Max 9 stops per driver for Google Maps.")
+        st.markdown("**Solutions:**")
+        st.markdown("- Increase number of drivers")
+        st.markdown("- Choose text directions only (feature coming soon)")
     else:
-        try:
-            coords = [geocode_address(addr) for addr in addresses]
-            coords_valid = [c for c in coords if c is not None]
+        coords = [geocode_address(addr) for addr in addresses]
+        address_coords = [(addr, coord) for addr, coord in zip(addresses, coords) if coord is not None]
 
-            if len(coords_valid) < num_drivers:
-                st.error("Not enough valid addresses to split between drivers.")
-            else:
-                if num_drivers == 1:
-                    clusters = {0: addresses}
-                else:
-                    kmeans = KMeans(n_clusters=num_drivers, random_state=42).fit(coords_valid)
-                    clusters = {i: [] for i in range(num_drivers)}
-                    for idx, label in enumerate(kmeans.labels_):
-                        clusters[label].append(addresses[idx])
+        if not address_coords:
+            st.error("No valid addresses found.")
+        else:
+            # Perform Agglomerative Clustering
+            all_coords = [coord for _, coord in address_coords]
+            num_clusters = math.ceil(len(address_coords) / 9)
+            clustering = AgglomerativeClustering(n_clusters=num_clusters).fit(all_coords)
 
-                for driver_num in range(num_drivers):
-                    driver_addresses = clusters[driver_num]
-                    st.subheader(f"🧭 Driver {driver_num + 1} Route")
+            clustered_addresses = {}
+            for label, (addr, _) in zip(clustering.labels_, address_coords):
+                clustered_addresses.setdefault(label, []).append(addr)
 
-                    route, drive_time, total_time, return_time = optimize_route(driver_addresses)
-
+            # Assign to drivers
+            cluster_list = list(clustered_addresses.values())
+            for idx, cluster in enumerate(cluster_list):
+                st.subheader(f"🛍️ Driver {idx + 1} Route")
+                try:
+                    route, drive_time, total_time, return_time = optimize_route(cluster)
                     for i, addr in enumerate(route):
                         st.write(f"{i}. {addr}")
-
                     st.write(f"- 🚘 Driving Time: {drive_time // 60} mins")
                     st.write(f"- ⏱️ Total Time (with {stop_time} min stops): {total_time // 60} mins")
                     st.write(f"- ↩️ Return to Start Time: {return_time // 60} mins")
 
-                    map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
-                    st.markdown(f"[Open Route in Google Maps]({map_url})")
+                    if len(route) > 10:
+                        st.warning("This route exceeds Google Maps stop limit. Use text directions instead.")
+                    else:
+                        map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
+                        st.markdown(f"[Open Route in Google Maps]({map_url})")
+                except Exception as e:
+                    st.error(f"❌ Error for Driver {idx + 1}: {e}")
 
-        except Exception as e:
-            st.error(f"❌ Error: {e}")

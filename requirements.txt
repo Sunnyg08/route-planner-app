@@ -1,5 +1,2 @@
 streamlit
 googlemaps
-PyMuPDF
-scikit-learn
-numpy

@@ -8,14 +8,6 @@ from itertools import permutations
 API_KEY = "AIzaSyDEMwIP-8B3Uu_lJFLlL4EQMBb6EOb_7Sw"
 gmaps = googlemaps.Client(key=API_KEY)
 
-import streamlit as st
-import googlemaps
-from itertools import permutations
-
-# Initialize Google Maps API
-API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
-gmaps = googlemaps.Client(key=API_KEY)
-
 st.set_page_config(page_title="Route Optimizer", layout="centered")
 st.title("🚗 Optimal Route Planner")
 st.write("Enter your starting point and multiple stops. Choose how to sort the route and how long you'll spend at each stop.")

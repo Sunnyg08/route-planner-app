@@ -103,33 +103,45 @@ if calculate_clicked:
         st.warning("Please enter at least one destination stop.")
     else:
         try:
-            # Geocode all addresses
             coords = [geocode_address(addr) for addr in addresses]
             coords_valid = [c for c in coords if c is not None]
             if len(coords_valid) < num_drivers:
                 st.error("Not enough valid addresses to split between drivers.")
             else:
-                # Cluster by location
                 kmeans = KMeans(n_clusters=num_drivers, random_state=42).fit(coords_valid)
                 clusters = {i: [] for i in range(num_drivers)}
                 for idx, label in enumerate(kmeans.labels_):
                     clusters[label].append(addresses[idx])
 
+                driver_cols = st.columns(num_drivers)
                 for driver_num in range(num_drivers):
-                    driver_addresses = clusters[driver_num]
-                    st.subheader(f"🧭 Driver {driver_num + 1} Route")
+                    with driver_cols[driver_num]:
+                        driver_addresses = clusters[driver_num]
+                        st.subheader(f"🧭 Driver {driver_num + 1} Route")
 
-                    route, drive_time, total_time, return_time = optimize_route(driver_addresses)
+                        route, drive_time, total_time, return_time = optimize_route(driver_addresses)
 
-                    for i, addr in enumerate(route):
-                        st.write(f"{i}. {addr}")
+                        for i, addr in enumerate(route):
+                            st.write(f"{i}. {addr}")
 
-                    st.write(f"- 🕒 Driving Time: {drive_time // 60} mins")
-                    st.write(f"- ⏱️ Total Time (with {stop_time} min stops): {total_time // 60} mins")
-                    st.write(f"- ↩️ Return to Start Time: {return_time // 60} mins")
+                        st.write(f"- 🕒 Driving Time: {drive_time // 60} mins")
+                        st.write(f"- ⏱️ Total Time (with {stop_time} min stops): {total_time // 60} mins")
+                        st.write(f"- ↩️ Return to Start Time: {return_time // 60} mins")
 
-                    map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
-                    st.markdown(f"[Open Route in Google Maps]({map_url})")
+                        st.subheader("🧭 Step-by-Step Directions")
+                        for i in range(len(route) - 1):
+                            orig = route[i]
+                            dest = route[i + 1]
+                            directions = gmaps.directions(orig, dest, mode="driving")[0]
+                            st.markdown(f"**From {orig} to {dest}:**")
+                            for step in directions['legs'][0]['steps']:
+                                instruction = step['html_instructions']
+                                distance = step['distance']['text']
+                                duration = step['duration']['text']
+                                st.markdown(f"- {instruction} ({distance}, {duration})", unsafe_allow_html=True)
+
+                        map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
+                        st.markdown(f"[Open Route in Google Maps]({map_url})")
 
         except Exception as e:
             st.error(f"❌ Error: {e}")

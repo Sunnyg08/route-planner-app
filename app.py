@@ -27,33 +27,27 @@ def reset_inputs():
     st.session_state.addresses_input = ""
     st.session_state.start_address = ""
 
-# Upload file (PDF, CSV, or Excel)
+# File uploader
+st.subheader("📄 Upload Addresses")
+uploaded_file = st.file_uploader("Upload PDF, CSV, or Excel with addresses (one per line):", type=["pdf", "csv", "xlsx"])
 
-uploaded_file = st.file_uploader("Upload a PDF, CSV, or Excel file with addresses:", type=["pdf", "csv", "xlsx"])
 extracted_addresses = []
 
 if uploaded_file:
-    try:
-        if uploaded_file.name.endswith(".pdf"):
-            with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
-                text = "\n".join([page.get_text() for page in doc])
-                extracted_addresses = [line.strip() for line in text.splitlines() if line.strip()]
-
-        elif uploaded_file.name.endswith(".csv"):
-            df = pd.read_csv(uploaded_file)
-            address_column = 'Address' if 'Address' in df.columns else df.columns[0]
-            extracted_addresses = df[address_column].dropna().astype(str).tolist()
-
-        elif uploaded_file.name.endswith((".xls", ".xlsx")):
-            df = pd.read_excel(uploaded_file)
-            address_column = 'Address' if 'Address' in df.columns else df.columns[0]
-            extracted_addresses = df[address_column].dropna().astype(str).tolist()
-
-    except Exception as e:
-        st.error(f"❌ Error reading file: {e}")
+    file_type = uploaded_file.name.split('.')[-1]
+    if file_type == "pdf":
+        with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+            text = "\n".join([page.get_text() for page in doc])
+            extracted_addresses = [line.strip() for line in text.splitlines() if line.strip()]
+    elif file_type == "csv":
+        df = pd.read_csv(uploaded_file)
+        extracted_addresses = df.iloc[:, 0].dropna().astype(str).tolist()
+    elif file_type == "xlsx":
+        df = pd.read_excel(uploaded_file)
+        extracted_addresses = df.iloc[:, 0].dropna().astype(str).tolist()
 
 # Driver count
-num_drivers = st.selectbox("Select number of drivers:", [1, 2, 3, 4])
+num_drivers = st.selectbox("Select number of drivers:", [1, 2, 3, 4, 5, 6])
 
 # Start and stop inputs
 start_address = st.text_input("Starting Address:", key="start_address")
@@ -71,7 +65,7 @@ col1, col2 = st.columns([1, 1])
 calculate_clicked = col1.button("Calculate Route")
 reset_clicked = col2.button("Reset", on_click=reset_inputs)
 
-# Helper: get lat/lng for clustering
+# Helper: geocode
 def geocode_address(address):
     geocode = gmaps.geocode(address)
     if geocode:
@@ -80,11 +74,16 @@ def geocode_address(address):
     return None
 
 # Helper: optimize route
-def optimize_route(address_list):
+def optimize_route(address_list, allow_no_map=False):
     all_addresses = [start_address] + address_list
+
+    # Google limit: 100 elements => max 10 locations
+    if len(all_addresses) > 10 and not allow_no_map:
+        return "LIMIT_EXCEEDED", None, None, None
+
     matrix = gmaps.distance_matrix(all_addresses, all_addresses, mode='driving')
     durations = [
-        [cell['duration']['value'] if cell.get('duration') else float('inf') for cell in row['elements']]
+        [cell['duration']['value'] for cell in row['elements']]
         for row in matrix['rows']
     ]
     stop_indices = list(range(1, len(all_addresses)))
@@ -112,7 +111,6 @@ def optimize_route(address_list):
 
     return optimal_addresses, route_drive_time, total_time, return_to_start_time
 
-# Route calculation
 if calculate_clicked:
     if not start_address:
         st.warning("Please enter a starting address.")
@@ -120,25 +118,45 @@ if calculate_clicked:
         st.warning("Please enter at least one destination stop.")
     else:
         try:
+            # Geocode all addresses
             coords = [geocode_address(addr) for addr in addresses]
             coords_valid = [c for c in coords if c is not None]
-
             if len(coords_valid) < num_drivers:
                 st.error("Not enough valid addresses to split between drivers.")
             else:
-                if num_drivers == 1:
-                    clusters = {0: addresses}
-                else:
-                    kmeans = KMeans(n_clusters=num_drivers, random_state=42).fit(coords_valid)
-                    clusters = {i: [] for i in range(num_drivers)}
-                    for idx, label in enumerate(kmeans.labels_):
-                        clusters[label].append(addresses[idx])
+                # Cluster
+                kmeans = KMeans(n_clusters=num_drivers, random_state=42).fit(coords_valid)
+                clusters = {i: [] for i in range(num_drivers)}
+                for idx, label in enumerate(kmeans.labels_):
+                    clusters[label].append(addresses[idx])
 
                 for driver_num in range(num_drivers):
                     driver_addresses = clusters[driver_num]
+
                     st.subheader(f"🧭 Driver {driver_num + 1} Route")
 
-                    route, drive_time, total_time, return_time = optimize_route(driver_addresses)
+                    if len(driver_addresses) + 1 > 10:
+                        st.warning(
+                            f"Driver {driver_num + 1} has {len(driver_addresses)} stops.\n\n"
+                            "⚠️ Google Maps allows a maximum of **10 locations per route** (including start).\n\n"
+                            "**Options:**\n"
+                            "- Increase number of drivers\n"
+                            "- Or use written directions only (no Google Maps link)"
+                        )
+                        allow_written_only = st.checkbox(f"Generate written directions only for Driver {driver_num + 1}", key=f"written_only_{driver_num}")
+                        if not allow_written_only:
+                            continue
+                        allow_no_map = True
+                    else:
+                        allow_no_map = False
+
+                    route_result = optimize_route(driver_addresses, allow_no_map=allow_no_map)
+
+                    if route_result == "LIMIT_EXCEEDED":
+                        st.error(f"Route for Driver {driver_num + 1} exceeds Google Maps limits.")
+                        continue
+
+                    route, drive_time, total_time, return_time = route_result
 
                     for i, addr in enumerate(route):
                         st.write(f"{i}. {addr}")
@@ -147,8 +165,9 @@ if calculate_clicked:
                     st.write(f"- ⏱️ Total Time (with {stop_time} min stops): {total_time // 60} mins")
                     st.write(f"- ↩️ Return to Start Time: {return_time // 60} mins")
 
-                    map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
-                    st.markdown(f"[Open Route in Google Maps]({map_url})")
+                    if not allow_no_map:
+                        map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
+                        st.markdown(f"[Open Route in Google Maps]({map_url})")
 
         except Exception as e:
             st.error(f"❌ Error: {e}")

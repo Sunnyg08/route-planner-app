@@ -26,7 +26,7 @@ def reset_inputs():
     st.session_state.addresses_input = ""
     st.session_state.start_address = ""
 
-# Upload PDF or enter manually
+# PDF upload
 pdf_file = st.file_uploader("Upload a PDF with addresses (one per line):", type=["pdf"])
 
 extracted_addresses = []
@@ -35,10 +35,8 @@ if pdf_file:
         text = "\n".join([page.get_text() for page in doc])
         extracted_addresses = [line.strip() for line in text.splitlines() if line.strip()]
 
-# Driver count
+# Inputs
 num_drivers = st.selectbox("Select number of drivers:", [1, 2, 3, 4])
-
-# Start and stop inputs
 start_address = st.text_input("Starting Address:", key="start_address")
 addresses_input = st.text_area(
     "Enter destination stops (one per line):",
@@ -47,31 +45,32 @@ addresses_input = st.text_area(
     key="addresses_input"
 )
 addresses = [a.strip() for a in addresses_input.split('\n') if a.strip()]
-
 stop_time = st.selectbox("Stop duration at each location (minutes):", [5, 7, 10])
 sort_method = st.selectbox("Sort by:", ["Normal Optimized Route", "Farthest First Route"])
 col1, col2 = st.columns([1, 1])
 calculate_clicked = col1.button("Calculate Route")
 reset_clicked = col2.button("Reset", on_click=reset_inputs)
 
-# Geocode helper
+# Helpers
 def geocode_address(address):
     try:
-        geocode = gmaps.geocode(address)
-        if geocode:
-            loc = geocode[0]['geometry']['location']
+        result = gmaps.geocode(address)
+        if result:
+            loc = result[0]['geometry']['location']
             return (loc['lat'], loc['lng'])
-    except:
+    except Exception:
         return None
     return None
 
-# Route optimization
-def optimize_route(address_list):
-    all_addresses = [start_address] + address_list
+def optimize_route(start, stops):
+    if not stops:
+        return [], 0, 0, 0
+
+    all_addresses = [start] + stops
     matrix = gmaps.distance_matrix(all_addresses, all_addresses, mode='driving')
 
     if 'rows' not in matrix or len(matrix['rows']) != len(all_addresses):
-        raise ValueError("Google Maps API did not return a full distance matrix.")
+        raise ValueError("Invalid response from Google Maps Distance Matrix.")
 
     durations = []
     for row in matrix['rows']:
@@ -105,13 +104,8 @@ def optimize_route(address_list):
         durations[optimal_order[i]][optimal_order[i + 1]]
         for i in range(len(optimal_order) - 1)
     )
-
-    try:
-        return_to_start_time = durations[optimal_order[-1]][0]
-    except:
-        return_to_start_time = 0
-
-    total_stop_time = stop_time * 60 * len(address_list)
+    return_to_start_time = durations[optimal_order[-1]][0]
+    total_stop_time = stop_time * 60 * len(stops)
     total_time = route_drive_time + total_stop_time
 
     return optimal_addresses, route_drive_time, total_time, return_to_start_time
@@ -125,39 +119,39 @@ if calculate_clicked:
     else:
         try:
             coords = [geocode_address(addr) for addr in addresses]
-            valid_coords = [(addr, c) for addr, c in zip(addresses, coords) if c is not None]
+            valid_data = [(addr, coord) for addr, coord in zip(addresses, coords) if coord is not None]
 
-            if len(valid_coords) < num_drivers:
-                st.error("Not enough valid addresses to split between drivers.")
+            if len(valid_data) < num_drivers:
+                st.error("Not enough valid addresses to assign to each driver.")
             else:
                 if num_drivers == 1:
-                    clusters = {0: [addr for addr, _ in valid_coords]}
+                    clusters = {0: [addr for addr, _ in valid_data]}
                 else:
-                    kmeans = KMeans(n_clusters=num_drivers, random_state=42).fit(
-                        np.array([c for _, c in valid_coords])
-                    )
+                    kmeans = KMeans(n_clusters=num_drivers, random_state=42)
+                    coords_only = [coord for _, coord in valid_data]
+                    kmeans.fit(coords_only)
                     clusters = {i: [] for i in range(num_drivers)}
-                    for (addr, _), label in zip(valid_coords, kmeans.labels_):
+                    for (addr, _), label in zip(valid_data, kmeans.labels_):
                         clusters[label].append(addr)
 
-                for driver_num in range(num_drivers):
-                    driver_addresses = clusters.get(driver_num, [])
-                    if not driver_addresses:
-                        st.warning(f"Driver {driver_num + 1} has no assigned addresses.")
+                for driver in range(num_drivers):
+                    stops = clusters.get(driver, [])
+                    if not stops:
+                        st.warning(f"No addresses for Driver {driver + 1}")
                         continue
 
-                    st.subheader(f"🧭 Driver {driver_num + 1} Route")
-                    route, drive_time, total_time, return_time = optimize_route(driver_addresses)
+                    st.subheader(f"🚚 Driver {driver + 1}")
+                    route, drive_time, total_time, return_time = optimize_route(start_address, stops)
 
                     for i, addr in enumerate(route):
                         st.write(f"{i}. {addr}")
 
-                    st.write(f"- 🕒 Driving Time: {drive_time // 60} mins")
-                    st.write(f"- ⏱️ Total Time (with {stop_time} min stops): {total_time // 60} mins")
-                    st.write(f"- ↩️ Return to Start Time: {return_time // 60} mins")
+                    st.markdown(f"- 🕒 **Drive time**: {drive_time // 60} mins")
+                    st.markdown(f"- ⏱️ **Total time (incl. stops)**: {total_time // 60} mins")
+                    st.markdown(f"- ↩️ **Return to start**: {return_time // 60} mins")
 
                     map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
-                    st.markdown(f"[Open Route in Google Maps]({map_url})")
+                    st.markdown(f"[🗺️ Open Route in Google Maps]({map_url})")
 
         except Exception as e:
             st.error(f"❌ Error: {e}")

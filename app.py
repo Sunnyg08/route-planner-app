@@ -17,7 +17,7 @@ addresses_input = st.text_area("Enter destination stops (one per line):", height
 addresses = [a.strip() for a in addresses_input.split('\n') if a.strip()]
 stop_time = st.selectbox("Stop duration at each location (minutes):", [5, 7, 10])
 
-if st.button("Calculate Optimal Route"):
+if st.button("Calculate Route"):
     if not start_address:
         st.warning("Please enter a starting address.")
     elif len(addresses) < 1:

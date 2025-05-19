@@ -1,2 +1,4 @@
 streamlit
 googlemaps
+scikit-learn
+pymupdf

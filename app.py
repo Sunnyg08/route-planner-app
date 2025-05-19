@@ -1,10 +1,10 @@
 # app.py
 import streamlit as st
 import googlemaps
-import fitz  # PyMuPDF
 from sklearn.cluster import KMeans
-from itertools import permutations
-import numpy as np
+import fitz  # PyMuPDF
+from io import StringIO
+import re
 
 
 # Initialize Google Maps client
@@ -12,8 +12,7 @@ API_KEY = "AIzaSyDEMwIP-8B3Uu_lJFLlL4EQMBb6EOb_7Sw"
 gmaps = googlemaps.Client(key=API_KEY)
 
 
-st.set_page_config(page_title="Route Optimizer App", layout="wide")
-st.title("🚗 Multi-Stop Route Optimizer with Driver Split")
+st.title("🚗 Optimal Route Planner (Kitchen K)")
 
 # Helper functions
 def geocode_address(address):
@@ -23,7 +22,7 @@ def geocode_address(address):
             lat = location[0]['geometry']['location']['lat']
             lng = location[0]['geometry']['location']['lng']
             return (lat, lng)
-    except Exception as e:
+    except:
         return None
 
 def get_drive_time(origin, destination):
@@ -31,7 +30,7 @@ def get_drive_time(origin, destination):
         result = gmaps.distance_matrix(origin, destination, mode="driving")
         duration = result['rows'][0]['elements'][0]['duration']['value']
         return duration
-    except Exception as e:
+    except:
         return float('inf')
 
 def optimize_route(addresses):
@@ -67,24 +66,23 @@ def extract_addresses_from_pdf(pdf_file):
     addresses = re.findall(r"\d{1,5} .+", text)
     return list(set([addr.strip() for addr in addresses if len(addr.strip()) > 10]))
 
-# Inputs
-with st.sidebar:
-    st.header("📍 Input Addresses")
-    input_method = st.radio("Choose Input Method", ["Manual Entry", "Upload PDF"])
+# Sidebar input
+st.sidebar.header("Input Options")
+input_method = st.sidebar.radio("Choose Input Method", ["Manual Entry", "Upload PDF"])
 
-    if input_method == "Manual Entry":
-        addresses_input = st.text_area("Enter one address per line")
-        addresses = [addr.strip() for addr in addresses_input.split("\n") if addr.strip() != ""]
-    else:
-        uploaded_file = st.file_uploader("Upload PDF with addresses", type="pdf")
-        addresses = extract_addresses_from_pdf(uploaded_file) if uploaded_file else []
+if input_method == "Manual Entry":
+    addresses_input = st.sidebar.text_area("Enter one address per line")
+    addresses = [addr.strip() for addr in addresses_input.split("\n") if addr.strip() != ""]
+else:
+    uploaded_file = st.sidebar.file_uploader("Upload PDF with addresses", type="pdf")
+    addresses = extract_addresses_from_pdf(uploaded_file) if uploaded_file else []
 
-    start_location = st.text_input("Starting Point", value="1600 Amphitheatre Parkway, Mountain View, CA")
-    stop_time = st.selectbox("Stop Duration at Each Address (minutes)", [5, 7, 10])
-    driver_count = st.selectbox("Number of Drivers", [1, 2, 3, 4])
-    sort_option = st.selectbox("Sort by", ["Normal Optimized Route", "Farthest First Route"])
-    calc = st.button("Calculate Route")
-    reset = st.button("Reset")
+start_location = st.sidebar.text_input("Starting Point", value="1600 Amphitheatre Parkway, Mountain View, CA")
+stop_time = st.sidebar.selectbox("Stop Duration at Each Address (minutes)", [5, 7, 10])
+driver_count = st.sidebar.selectbox("Number of Drivers", [1, 2, 3, 4])
+sort_option = st.sidebar.selectbox("Sort by", ["Normal Optimized Route", "Farthest First Route"])
+calc = st.sidebar.button("Calculate Route")
+reset = st.sidebar.button("Reset")
 
 if reset:
     st.experimental_rerun()
@@ -113,15 +111,18 @@ if calc and addresses:
 
         st.subheader("🧭 Step-by-Step Directions")
         for i in range(len(route) - 1):
-            orig = route[i]
-            dest = route[i + 1]
-            directions = gmaps.directions(orig, dest, mode="driving")[0]
-            st.markdown(f"**From {orig} to {dest}:**")
-            for step in directions['legs'][0]['steps']:
-                instruction = step['html_instructions']
-                distance = step['distance']['text']
-                duration = step['duration']['text']
-                st.markdown(f"- {instruction} ({distance}, {duration})", unsafe_allow_html=True)
+            try:
+                orig = route[i]
+                dest = route[i + 1]
+                directions = gmaps.directions(orig, dest, mode="driving")[0]
+                st.markdown(f"**From {orig} to {dest}:**")
+                for step in directions['legs'][0]['steps']:
+                    instruction = step['html_instructions']
+                    distance = step['distance']['text']
+                    duration = step['duration']['text']
+                    st.markdown(f"- {instruction} ({distance}, {duration})", unsafe_allow_html=True)
+            except Exception as e:
+                st.warning(f"Error getting directions between {orig} and {dest}")
 
         map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
         st.markdown(f"[Open Route in Google Maps]({map_url})")
@@ -171,15 +172,18 @@ if calc and addresses:
 
                     st.subheader("🧭 Step-by-Step Directions")
                     for i in range(len(route) - 1):
-                        orig = route[i]
-                        dest = route[i + 1]
-                        directions = gmaps.directions(orig, dest, mode="driving")[0]
-                        st.markdown(f"**From {orig} to {dest}:**")
-                        for step in directions['legs'][0]['steps']:
-                            instruction = step['html_instructions']
-                            distance = step['distance']['text']
-                            duration = step['duration']['text']
-                            st.markdown(f"- {instruction} ({distance}, {duration})", unsafe_allow_html=True)
+                        try:
+                            orig = route[i]
+                            dest = route[i + 1]
+                            directions = gmaps.directions(orig, dest, mode="driving")[0]
+                            st.markdown(f"**From {orig} to {dest}:**")
+                            for step in directions['legs'][0]['steps']:
+                                instruction = step['html_instructions']
+                                distance = step['distance']['text']
+                                duration = step['duration']['text']
+                                st.markdown(f"- {instruction} ({distance}, {duration})", unsafe_allow_html=True)
+                        except Exception as e:
+                            st.warning(f"Error getting directions between {orig} and {dest}")
 
                     map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
                     st.markdown(f"[Open Route in Google Maps]({map_url})")

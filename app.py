@@ -12,136 +12,178 @@ API_KEY = "AIzaSyDEMwIP-8B3Uu_lJFLlL4EQMBb6EOb_7Sw"
 gmaps = googlemaps.Client(key=API_KEY)
 
 
-st.set_page_config(page_title="Multi-Driver Route Planner", layout="centered")
-st.title("🚗 Optimal Route Planner (Kitchen K)")
+st.set_page_config(page_title="Route Optimizer App", layout="wide")
+st.title("🚗 Multi-Stop Route Optimizer with Driver Split")
 
-# Session defaults
-if "addresses_input" not in st.session_state:
-    st.session_state.addresses_input = ""
-if "start_address" not in st.session_state:
-    st.session_state.start_address = ""
-
-# Reset function
-def reset_inputs():
-    st.session_state.addresses_input = ""
-    st.session_state.start_address = ""
-
-# Upload PDF or enter manually
-pdf_file = st.file_uploader("Upload a PDF with addresses (one per line):", type=["pdf"])
-
-extracted_addresses = []
-if pdf_file:
-    with fitz.open(stream=pdf_file.read(), filetype="pdf") as doc:
-        text = "\n".join([page.get_text() for page in doc])
-        extracted_addresses = [line.strip() for line in text.splitlines() if line.strip()]
-
-# Driver count
-num_drivers = st.selectbox("Select number of drivers:", [1, 2, 3, 4])
-
-# Start and stop inputs
-start_address = st.text_input("Starting Address:", key="start_address")
-addresses_input = st.text_area(
-    "Enter destination stops (one per line):",
-    value="\n".join(extracted_addresses) if extracted_addresses else st.session_state.addresses_input,
-    height=200,
-    key="addresses_input"
-)
-addresses = [a.strip() for a in addresses_input.split('\n') if a.strip()]
-
-stop_time = st.selectbox("Stop duration at each location (minutes):", [5, 7, 10])
-sort_method = st.selectbox("Sort by:", ["Normal Optimized Route", "Farthest First Route"])
-col1, col2 = st.columns([1, 1])
-calculate_clicked = col1.button("Calculate Route")
-reset_clicked = col2.button("Reset", on_click=reset_inputs)
-
-# Helper: get lat/lng for clustering
+# Helper functions
 def geocode_address(address):
-    geocode = gmaps.geocode(address)
-    if geocode:
-        loc = geocode[0]['geometry']['location']
-        return (loc['lat'], loc['lng'])
-    return None
+    try:
+        location = gmaps.geocode(address)
+        if location:
+            lat = location[0]['geometry']['location']['lat']
+            lng = location[0]['geometry']['location']['lng']
+            return (lat, lng)
+    except:
+        return None
 
-# Helper: optimize route
+def get_drive_time(origin, destination):
+    try:
+        result = gmaps.distance_matrix(origin, destination, mode="driving")
+        duration = result['rows'][0]['elements'][0]['duration']['value']
+        return duration
+    except:
+        return float('inf')
 
-def optimize_route(address_list):
-    all_addresses = [start_address] + address_list
-    matrix = gmaps.distance_matrix(all_addresses, all_addresses, mode='driving')
-    durations = [
-        [cell['duration']['value'] for cell in row['elements']]
-        for row in matrix['rows']
-    ]
-    stop_indices = list(range(1, len(all_addresses)))
+def optimize_route(addresses):
+    if len(addresses) <= 1:
+        return addresses, 0, 0, 0
 
-    if sort_method == "Normal Optimized Route":
-        best_order = None
-        best_time = float('inf')
-        for perm in permutations(stop_indices):
-            order = [0] + list(perm)
-            total = sum(durations[order[i]][order[i + 1]] for i in range(len(order) - 1))
-            if total < best_time:
-                best_time = total
-                best_order = order
-        optimal_order = best_order
+    origin = addresses[0]
+    rest = addresses[1:]
+    n = len(rest)
 
-    elif sort_method == "Farthest First Route":
-        sorted_stops = sorted(stop_indices, key=lambda i: -durations[0][i])
-        optimal_order = [0] + sorted_stops
+    import itertools
+    min_route = []
+    min_time = float('inf')
 
-    optimal_addresses = [all_addresses[i] for i in optimal_order]
-    route_drive_time = sum(durations[optimal_order[i]][optimal_order[i + 1]] for i in range(len(optimal_order) - 1))
-    return_to_start_time = durations[optimal_order[-1]][0]
-    total_stop_time = stop_time * 60 * len(address_list)
-    total_time = route_drive_time + total_stop_time
+    for perm in itertools.permutations(rest):
+        route = [origin] + list(perm)
+        time = sum(get_drive_time(route[i], route[i+1]) for i in range(len(route)-1))
+        if time < min_time:
+            min_time = time
+            min_route = route
 
-    return optimal_addresses, route_drive_time, total_time, return_to_start_time
+    return_time = get_drive_time(min_route[-1], origin)
+    stop_duration = stop_time * 60 * len(min_route)
+    total_time_with_stops = min_time + stop_duration
 
-if calculate_clicked:
-    if not start_address:
-        st.warning("Please enter a starting address.")
-    elif len(addresses) < 1:
-        st.warning("Please enter at least one destination stop.")
+    return min_route, min_time, total_time_with_stops, return_time
+
+def extract_addresses_from_pdf(pdf_file):
+    doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    addresses = re.findall(r"\d{1,5} .+", text)
+    return list(set([addr.strip() for addr in addresses if len(addr.strip()) > 10]))
+
+# Inputs
+with st.sidebar:
+    st.header("📍 Input Addresses")
+    input_method = st.radio("Choose Input Method", ["Manual Entry", "Upload PDF"])
+
+    if input_method == "Manual Entry":
+        addresses_input = st.text_area("Enter one address per line")
+        addresses = [addr.strip() for addr in addresses_input.split("\n") if addr.strip() != ""]
     else:
-        try:
+        uploaded_file = st.file_uploader("Upload PDF with addresses", type="pdf")
+        addresses = extract_addresses_from_pdf(uploaded_file) if uploaded_file else []
+
+    start_location = st.text_input("Starting Point", value="1600 Amphitheatre Parkway, Mountain View, CA")
+    stop_time = st.selectbox("Stop Duration at Each Address (minutes)", [5, 7, 10])
+    driver_count = st.selectbox("Number of Drivers", [1, 2, 3, 4])
+    sort_option = st.selectbox("Sort by", ["Normal Optimized Route", "Farthest First Route"])
+    calc = st.button("Calculate Route")
+    reset = st.button("Reset")
+
+if reset:
+    st.experimental_rerun()
+
+if calc and addresses:
+    addresses = [start_location] + addresses
+
+    if driver_count == 1:
+        if sort_option == "Farthest First Route":
             coords = [geocode_address(addr) for addr in addresses]
-            coords_valid = [c for c in coords if c is not None]
-            if len(coords_valid) < num_drivers:
-                st.error("Not enough valid addresses to split between drivers.")
-            else:
-                kmeans = KMeans(n_clusters=num_drivers, random_state=42).fit(coords_valid)
-                clusters = {i: [] for i in range(num_drivers)}
-                for idx, label in enumerate(kmeans.labels_):
-                    clusters[label].append(addresses[idx])
+            start_coord = coords[0]
+            distances = [((c[0] - start_coord[0])**2 + (c[1] - start_coord[1])**2, i)
+                         for i, c in enumerate(coords) if c is not None]
+            sorted_indices = [i for _, i in sorted(distances, reverse=True)]
+            addresses = [addresses[0]] + [addresses[i] for i in sorted_indices if i != 0]
 
-                driver_cols = st.columns(num_drivers)
-                for driver_num in range(num_drivers):
-                    with driver_cols[driver_num]:
-                        driver_addresses = clusters[driver_num]
-                        st.subheader(f"🧭 Driver {driver_num + 1} Route")
+        route, drive_time, total_time, return_time = optimize_route(addresses)
 
-                        route, drive_time, total_time, return_time = optimize_route(driver_addresses)
+        st.subheader("🧭 Optimized Route")
+        for i, addr in enumerate(route):
+            st.write(f"{i}. {addr}")
 
-                        for i, addr in enumerate(route):
-                            st.write(f"{i}. {addr}")
+        st.write(f"- 🕒 Driving Time: {drive_time // 60} mins")
+        st.write(f"- ⏱️ Total Time (with {stop_time} min stops): {total_time // 60} mins")
+        st.write(f"- ↩️ Return to Start Time: {return_time // 60} mins")
 
-                        st.write(f"- 🕒 Driving Time: {drive_time // 60} mins")
-                        st.write(f"- ⏱️ Total Time (with {stop_time} min stops): {total_time // 60} mins")
-                        st.write(f"- ↩️ Return to Start Time: {return_time // 60} mins")
+        st.subheader("🧭 Step-by-Step Directions")
+        for i in range(len(route) - 1):
+            orig = route[i]
+            dest = route[i + 1]
+            directions = gmaps.directions(orig, dest, mode="driving")[0]
+            st.markdown(f"**From {orig} to {dest}:**")
+            for step in directions['legs'][0]['steps']:
+                instruction = step['html_instructions']
+                distance = step['distance']['text']
+                duration = step['duration']['text']
+                st.markdown(f"- {instruction} ({distance}, {duration})", unsafe_allow_html=True)
 
-                        st.subheader("🧭 Step-by-Step Directions")
-                        for i in range(len(route) - 1):
-                            orig = route[i]
-                            dest = route[i + 1]
-                            directions = gmaps.directions(orig, dest, mode="driving")[0]
-                            st.markdown(f"**From {orig} to {dest}:**")
-                            for step in directions['legs'][0]['steps']:
-                                instruction = step['html_instructions']
-                                distance = step['distance']['text']
-                                duration = step['duration']['text']
-                                st.markdown(f"- {instruction} ({distance}, {duration})", unsafe_allow_html=True)
+        map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
+        st.markdown(f"[Open Route in Google Maps]({map_url})")
 
-                        map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
-                        st.markdown(f"[Open Route in Google Maps]({map_url})")
+    else:
+        # Geocode and collect valid addresses with their coordinates
+        address_coords = []
+        valid_addresses = []
+
+        for addr in addresses:
+            coord = geocode_address(addr)
+            if coord:
+                address_coords.append(coord)
+                valid_addresses.append(addr)
+
+        if len(address_coords) < driver_count:
+            st.error("❌ Not enough valid addresses to split between selected number of drivers.")
+        else:
+            kmeans = KMeans(n_clusters=driver_count, random_state=42).fit(address_coords)
+            labels = kmeans.labels_
+
+            clusters = {i: [] for i in range(driver_count)}
+            for i, label in enumerate(labels):
+                clusters[label].append(valid_addresses[i])
+
+            driver_cols = st.columns(driver_count)
+            for driver_num in range(driver_count):
+                with driver_cols[driver_num]:
+                    driver_addresses = [start_location] + clusters[driver_num]
+
+                    if sort_option == "Farthest First Route":
+                        coords = [geocode_address(addr) for addr in driver_addresses]
+                        start_coord = coords[0]
+                        distances = [((c[0] - start_coord[0])**2 + (c[1] - start_coord[1])**2, i)
+                                     for i, c in enumerate(coords) if c is not None]
+                        sorted_indices = [i for _, i in sorted(distances, reverse=True)]
+                        driver_addresses = [driver_addresses[0]] + [driver_addresses[i] for i in sorted_indices if i != 0]
+
+                    st.subheader(f"🧭 Driver {driver_num + 1} Route")
+                    route, drive_time, total_time, return_time = optimize_route(driver_addresses)
+
+                    for i, addr in enumerate(route):
+                        st.write(f"{i}. {addr}")
+
+                    st.write(f"- 🕒 Driving Time: {drive_time // 60} mins")
+                    st.write(f"- ⏱️ Total Time (with {stop_time} min stops): {total_time // 60} mins")
+                    st.write(f"- ↩️ Return to Start Time: {return_time // 60} mins")
+
+                    st.subheader("🧭 Step-by-Step Directions")
+                    for i in range(len(route) - 1):
+                        orig = route[i]
+                        dest = route[i + 1]
+                        directions = gmaps.directions(orig, dest, mode="driving")[0]
+                        st.markdown(f"**From {orig} to {dest}:**")
+                        for step in directions['legs'][0]['steps']:
+                            instruction = step['html_instructions']
+                            distance = step['distance']['text']
+                            duration = step['duration']['text']
+                            st.markdown(f"- {instruction} ({distance}, {duration})", unsafe_allow_html=True)
+
+                    map_url = "https://www.google.com/maps/dir/" + "/".join(route).replace(" ", "+")
+                    st.markdown(f"[Open Route in Google Maps]({map_url})")
 
         except Exception as e:
             st.error(f"❌ Error: {e}")

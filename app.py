@@ -144,7 +144,7 @@ if calculate_clicked:
             # Assign to drivers
             cluster_list = list(clustered_addresses.values())
             for idx, cluster in enumerate(cluster_list):
-                st.subheader(f"🛍️ Driver {idx + 1} Route")
+                st.subheader(f"🚘 Driver {idx + 1} Route")
                 try:
                     route, drive_time, total_time, return_time = optimize_route(cluster)
                     for i, addr in enumerate(route):

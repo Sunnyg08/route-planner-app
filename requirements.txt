@@ -3,3 +3,5 @@ googlemaps
 PyMuPDF
 scikit-learn
 numpy
+openpyxl
+pandas

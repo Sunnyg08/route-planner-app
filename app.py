@@ -22,12 +22,12 @@ st.markdown(
     <div style="background-color:#fff3cd; padding:10px; border-radius:8px; border-left: 6px solid #ffa500;">
         <strong>⚠️ Note:</strong> Google Maps only allows a maximum of <strong>10 locations per route</strong>, including the start point. 
         If a driver has more than <strong>9 stops</strong>, the route will not be generated. <br><br>
-        👉 To fix this, increase the number of drivers or enable the text-based directions fallback option.
+        👉 To fix this, increase the number of drivers or enable the text-based directions fallback option. <br><br>
+        📌 Please also make sure to enter at least <strong>2 valid addresses</strong> to calculate a route.
     </div>
     """,
     unsafe_allow_html=True
 )
-
 
 # Session defaults
 if "addresses_input" not in st.session_state:
